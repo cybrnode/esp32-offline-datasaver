@@ -18,13 +18,9 @@ bool uploadData(String data){
 
   bool res = false;
   HTTPClient http;
+  http.begin("https://postman-echo.com/post");
   
-  String serverPath = "?temperature=24.37";
-      
-  http.begin(serverPath.c_str());
-  
-  int httpResponseCode = http.POST("");
-      
+  int httpResponseCode = http.POST(data);
   if (httpResponseCode == 200) {
     res = true;
     Serial.print("HTTP Response code: ");
@@ -68,19 +64,51 @@ int listDir(fs::FS &fs){
 }
 
 
-void readFile(fs::FS &fs, const char * path){
+String getNextBatchFile(){
+  Serial.print("Listing directory:");
+  
+  File root = SPIFFS.open("/");
+  
+  if(!root){
+      Serial.println("- failed to open directory");
+      return "";
+  }
+  if(!root.isDirectory()){
+      Serial.println(" - not a directory");
+      return "";
+  }
+
+  File file = root.openNextFile();
+  if (file) return String(file.name());
+  else return "";
+  
+}
+
+void deleteFile(fs::FS &fs, const char * path){
+    Serial.printf("Deleting file: %s\r\n", path);
+    if(fs.remove(path)){
+        Serial.println("- file deleted");
+    } else {
+        Serial.println("- delete failed");
+    }
+}
+
+String readFile(fs::FS &fs, const char * path){
     Serial.printf("Reading file: %s\r\n", path);
 
     File file = fs.open(path);
     if (!file || file.isDirectory()) {
         Serial.println("- failed to open file for reading");
-        return;
+        return "";
     }
 
     Serial.println("- read from file:");
+    String data;
     while(file.available()){
-        Serial.write(file.read());
+        data = data + file.read();
     }
+
+    return data;
 }
 
 void writeFile(fs::FS &fs, const char * path, const char * message){
@@ -98,93 +126,6 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
     }
 }
 
-void appendFile(fs::FS &fs, const char * path, const char * message){
-    Serial.printf("Appending to file: %s\r\n", path);
-
-    File file = fs.open(path, FILE_APPEND);
-    if(!file){
-        Serial.println("- failed to open file for appending");
-        return;
-    }
-    if(file.print(message)){
-        Serial.println("- message appended");
-    } else {
-        Serial.println("- append failed");
-    }
-}
-
-void renameFile(fs::FS &fs, const char * path1, const char * path2){
-    Serial.printf("Renaming file %s to %s\r\n", path1, path2);
-    if (fs.rename(path1, path2)) {
-        Serial.println("- file renamed");
-    } else {
-        Serial.println("- rename failed");
-    }
-}
-
-void deleteFile(fs::FS &fs, const char * path){
-    Serial.printf("Deleting file: %s\r\n", path);
-    if(fs.remove(path)){
-        Serial.println("- file deleted");
-    } else {
-        Serial.println("- delete failed");
-    }
-}
-
-void testFileIO(fs::FS &fs, const char * path){
-    Serial.printf("Testing file I/O with %s\r\n", path);
-
-    static uint8_t buf[512];
-    size_t len = 0;
-    File file = fs.open(path, FILE_WRITE);
-    if(!file){
-        Serial.println("- failed to open file for writing");
-        return;
-    }
-
-    size_t i;
-    Serial.print("- writing" );
-    uint32_t start = millis();
-    for(i=0; i<2048; i++){
-        if ((i & 0x001F) == 0x001F){
-          Serial.print(".");
-        }
-        file.write(buf, 512);
-    }
-    Serial.println("");
-    uint32_t end = millis() - start;
-    Serial.printf(" - %u bytes written in %u ms\r\n", 2048 * 512, end);
-    file.close();
-
-    file = fs.open(path);
-    start = millis();
-    end = start;
-    i = 0;
-    if(file && !file.isDirectory()){
-        len = file.size();
-        size_t flen = len;
-        start = millis();
-        Serial.print("- reading" );
-        while(len){
-            size_t toRead = len;
-            if(toRead > 512){
-                toRead = 512;
-            }
-            file.read(buf, toRead);
-            if ((i++ & 0x001F) == 0x001F){
-              Serial.print(".");
-            }
-            len -= toRead;
-        }
-        Serial.println("");
-        end = millis() - start;
-        Serial.printf("- %u bytes read in %u ms\r\n", flen, end);
-        file.close();
-    } else {
-        Serial.println("- failed to open file for reading");
-    }
-}
-
 void setup(){
   
   Serial.begin(115200);
@@ -194,32 +135,14 @@ void setup(){
   WiFi.begin(ssid, password);
   Serial.println("WiFi intialized");
   
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(WiFi.localIP());
-  }
-    
-    
   if(!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){
-    Serial.println("SPIFFS Mount Failed");
+    Serial.println("SPIFFS Mount Failed, Going to formate file system");
     return;
   } else {
     Serial.println("File system mounted successfully");
   }
   
-  
-    Serial.println(listDir(SPIFFS));
-    writeFile(SPIFFS, "/hello.txt", "Hello ");
-    Serial.println(listDir(SPIFFS));
-    writeFile(SPIFFS, "/hello1.txt", "Hello ");
-    Serial.println(listDir(SPIFFS));
-    writeFile(SPIFFS, "/hello2.txt", "Hello ");
-    Serial.println(listDir(SPIFFS));
-    deleteFile(SPIFFS, "/hello.txt");
-    Serial.println(listDir(SPIFFS));
-    deleteFile(SPIFFS, "/hello1.txt");
-    Serial.println(listDir(SPIFFS));
-    deleteFile(SPIFFS, "/hello2.txt");
-    Serial.println(listDir(SPIFFS));
+ 
     /*
     writeFile(SPIFFS, "/hello.txt", "Hello ");
     appendFile(SPIFFS, "/hello.txt", "World!\r\n");
@@ -233,17 +156,71 @@ void setup(){
     */
 }
 
-int i = 0;
-String sample[4];
+int currentBatch = 0;
+const int BATCH_SIZE = 4;
+String sample[BATCH_SIZE];
+int batchNumber = 0;
+
+
+
 void loop(){
+  
   if (sensorEvent.trigger()) {
     // Don't allow shutdown
-    sample[i++] = takeSample();
-    if (i == 4){
+    sample[currentBatch] = takeSample();
+    
+    Serial.print("Sample taken [");
+    Serial.print(currentBatch);
+    Serial.print("] ");
+    Serial.println(sample[currentBatch]);
+    
+    currentBatch++;
+    if (currentBatch == BATCH_SIZE){
       // allow shutdown
-      i = 0;
+
+      Serial.println("BATCH Complete --");
+      
+      currentBatch = 0;
+      String data = "";  
+      for (int n = 0; n < BATCH_SIZE; n++)
+        data = sample[n] + "\n" + data;
+
+      Serial.println("WRITING] DATA batch on file");
+      Serial.println(data);
+      const char * fileName = (String("/") + batchNumber++).c_str();
+      const char * dataStr = data.c_str();
+      writeFile(SPIFFS, fileName, dataStr);
+      Serial.println("WRITE Complete");
+      delete fileName;
+      delete dataStr;
       // Save data on file
-      Serial.println();
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) { // Replace with your connection check
+
+    Serial.print("Connection established with IP :");
+    Serial.println(WiFi.localIP());
+    
+    if (listDir(SPIFFS) > 0){ // There is data in system
+      Serial.println("SELECTING next batch");
+      const char * batchFileName = getNextBatchFile().c_str();
+      Serial.print("BATCH name: ");
+      delay(30);
+      
+      Serial.println(batchFileName);
+      String data = readFile(SPIFFS, batchFileName);
+      delay(30);
+
+      Serial.println("Uploading files");
+      bool batchUploadStatus = uploadData(data);
+      Serial.print("BatchUploadStatus -> ");
+      Serial.println(batchUploadStatus);
+      delay(30);
+
+      if (batchUploadStatus){
+        deleteFile(SPIFFS, batchFileName);
+      }
     }
   }
   
