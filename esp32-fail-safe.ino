@@ -14,45 +14,65 @@ String takeSample(){
   return String("192......,") + (rand() % 100);
 }
 
-bool uploadData(){
+bool uploadData(String data){
+
+  bool res = false;
+  HTTPClient http;
   
-}
-void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
-    Serial.printf("Listing directory: %s\r\n", dirname);
+  String serverPath = "?temperature=24.37";
+      
+  http.begin(serverPath.c_str());
+  
+  int httpResponseCode = http.POST("");
+      
+  if (httpResponseCode == 200) {
+    res = true;
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    String payload = http.getString();
+    Serial.println(payload);
+  } else {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
 
-    File root = fs.open(dirname);
-    if(!root){
-        Serial.println("- failed to open directory");
-        return;
-    }
-    if(!root.isDirectory()){
-        Serial.println(" - not a directory");
-        return;
-    }
-
-    File file = root.openNextFile();
-    while(file){
-        if(file.isDirectory()){
-            Serial.print("  DIR : ");
-            Serial.println(file.name());
-            if(levels){
-                listDir(fs, file.name(), levels -1);
-            }
-        } else {
-            Serial.print("  FILE: ");
-            Serial.print(file.name());
-            Serial.print("\tSIZE: ");
-            Serial.println(file.size());
-        }
-        file = root.openNextFile();
-    }
+  return res;
 }
+int listDir(fs::FS &fs){
+  int fileCount = 0;
+  Serial.print("Listing directory:");
+  
+  File root = fs.open("/");
+  
+  if(!root){
+      Serial.println("- failed to open directory");
+      return -1;
+  }
+  if(!root.isDirectory()){
+      Serial.println(" - not a directory");
+      return -1;
+  }
+
+  File file = root.openNextFile();
+  while(file) {
+    fileCount++;
+    Serial.print("  FILE: ");
+    Serial.print(file.name());
+    Serial.print("\tSIZE: ");
+    Serial.println(file.size());
+    file = root.openNextFile();
+  }
+
+  return fileCount;
+}
+
 
 void readFile(fs::FS &fs, const char * path){
     Serial.printf("Reading file: %s\r\n", path);
 
     File file = fs.open(path);
-    if(!file || file.isDirectory()){
+    if (!file || file.isDirectory()) {
         Serial.println("- failed to open file for reading");
         return;
     }
@@ -186,8 +206,21 @@ void setup(){
     Serial.println("File system mounted successfully");
   }
   
-  /*
-    listDir(SPIFFS, "/", 0);
+  
+    Serial.println(listDir(SPIFFS));
+    writeFile(SPIFFS, "/hello.txt", "Hello ");
+    Serial.println(listDir(SPIFFS));
+    writeFile(SPIFFS, "/hello1.txt", "Hello ");
+    Serial.println(listDir(SPIFFS));
+    writeFile(SPIFFS, "/hello2.txt", "Hello ");
+    Serial.println(listDir(SPIFFS));
+    deleteFile(SPIFFS, "/hello.txt");
+    Serial.println(listDir(SPIFFS));
+    deleteFile(SPIFFS, "/hello1.txt");
+    Serial.println(listDir(SPIFFS));
+    deleteFile(SPIFFS, "/hello2.txt");
+    Serial.println(listDir(SPIFFS));
+    /*
     writeFile(SPIFFS, "/hello.txt", "Hello ");
     appendFile(SPIFFS, "/hello.txt", "World!\r\n");
     readFile(SPIFFS, "/hello.txt");
@@ -200,31 +233,19 @@ void setup(){
     */
 }
 
-
+int i = 0;
+String sample[4];
 void loop(){
   if (sensorEvent.trigger()) {
-    Serial.println(takeSample());
+    // Don't allow shutdown
+    sample[i++] = takeSample();
+    if (i == 4){
+      // allow shutdown
+      i = 0;
+      // Save data on file
+      Serial.println();
+    }
   }
-
-  HTTPClient http;
-  String serverPath = serverName + "?temperature=24.37";
-      
-  // Your Domain name with URL path or IP address with path
-  http.begin(serverPath.c_str());
-      
-  // Send HTTP GET request
-  int httpResponseCode = http.GET();
-      
-  if (httpResponseCode > 0) {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    String payload = http.getString();
-    Serial.println(payload);
-  }
-  else {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode);
-  }
-  http.end();
-  vdelay(20);
+  
+  delay(20);
 }
